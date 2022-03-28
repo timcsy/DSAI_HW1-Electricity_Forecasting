@@ -1,0 +1,245 @@
+DSAI-HW-2021
+===
+
+安裝
+---
+```
+pip install -r requirements.txt
+```
+
+執行
+---
+```
+python app.py --training training_data.csv --output submission.csv
+```
+
+使用資料
+---
+- [台灣電力公司_過去電力供需資訊](https://data.gov.tw/dataset/19995)
+  - 改名為 `training_data.csv`
+
+想法
+---
+- 想要實作以下兩篇論文內容，應用在電力預測
+  - [Temporal Regularized Matrix Factorization for High-dimensional Time Series Prediction](https://www.cs.utexas.edu/~rofuyu/papers/tr-mf-nips.pdf)
+  - [Autoregressive Tensor Factorization for Spatio-temporal Predictions](https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=8215609)
+- 實際情況
+  - 因為理解需要大量時間跟腦力，目前只做到使用 Alternating Optimization 做到用張量分解來「補值」，詳情參考下面「嘗試過程」，code 部分參考「test.ipynb」以及「MF.py」
+  - 只有先用簡單的例子來測試
+  - 對於完全沒有資訊的地方，傳統的矩陣分解會直接給出 trivial solution 也就是 0，所以不能拿來做預測（forcasting）
+  - 要做預測需要加上時間相關的 Regularization term，參考 TRMF-AR（Temporal Regularized Matrix Factorization for High-dimensional Time Series Prediction）
+  - 不過在實作的時候卡在一個點，來不及完成，所以這次的作業就先暫時用 Facebook 提供的 Prophet 模型完成，日後再來研究 TRMF 方法
+  - 如果想要討論這部分（TRMF）的 code 或是論文，歡迎在 Github issue 留言
+
+嘗試過程
+---
+- CP 分解因為特徵矩陣均不稀疏，所以就只能用 dense matrix 了
+- 矩陣分解不穩定（就連 I 也都存在好幾種分解法）
+  - 矩陣分解沒有唯一性
+    - 不過可以看到 I 可以由 ATA 分解
+    - 不過能不能至少我的 feature 是正交的？
+      - 猜想：使用 SSD regularizer 會不會比較可以達到這點？
+  - 不同初始值影響極大
+  - 如果不是要求 SVD 那就可能不會轉換到那麼有特徵的空間了
+  - Funk-SVD 不是 SVD，而是用近似的矩陣，是用來補缺失值的（也就是說原來非零的部分可以不用動）
+- 梯度下降非常容易收斂不了
+  - 因為是 non-convex
+  - 加上 regularization term
+    - penalty_weight 太高（1）效果不太好，但是小於 1e-2 效果不錯
+      - 但好像原本的（penalty_weight=0）比較好
+      - 在 I3x3 之下，1e-3
+        - 1e-4 以下沒作用
+        - 1 附近訓練最久，效果又是偏向 regularization term（四不像）
+        - 大於 1000 會 overflow
+    - 加了之後收斂會變慢，但是比較不會被困住
+  - rank = min(X.shape) 要記得加在，不然就會是 low rank 的結果
+  - 補值的效果不好
+    - 因為忘記加遮罩（mask），加完後效果不錯
+    - ALS 加上遮罩之後要用加總有觀察到的東西來算
+  - 對於完全沒有資訊的地方，ALS 會直接給出 trivial solution 也就是 0，後面的東西也都會被洗掉
+  - ALS 比 SGD 稍慢！？
+    - 但迭代次數可以少十倍以上
+- ALS
+  - [scipy.linalg.cho_solve](https://docs.scipy.org/doc/scipy/reference/generated/scipy.linalg.cho_solve.html)
+- GRALS
+  - Graph Regularized Alternating Least Squares
+  - 可以有不需要 vectorization 的計算方法
+- TRMF
+  - 有點卡住，不太知道如何 Updating X，要如何和 GRALS 完全對應
+
+
+## 參考資料
+- Matrix Factorization
+  - [Matrix Factorization 矩陣分解](https://wenwu53.com/matrix-factorization/)
+  - [[Paper] Wide & Deep Learning for Recommender Systems](https://www.ycc.idv.tw/wide-and-deep-learning.html)
+    - 以往認為deep learning有辦法完全取代feature engineering，Google在2016年寫下的這篇paper，指出在數據相對稀疏（sparse）的情況下feature engineering仍然有其重要性
+    - 或許可以融合 MF 和 DL 試試看
+  - [輕讀論文(二):DeepFM: A Factorization-Machine based Neural Network for CTR Prediction](https://lufor129.medium.com/%E8%BC%95%E8%AE%80%E8%AB%96%E6%96%87-%E4%BA%8C-deepfm-a-factorization-machine-based-neural-network-for-ctr-prediction-9de74b8772ab)
+    - 可以試試看，然後延伸到高階情況
+  - [Accelerating Deep Neural Networks with Tensor Decompositions](https://jacobgil.github.io/deeplearning/tensor-decompositions-deep-learning)
+    - CNN 結合張量分解
+  - [Autoregressive Tensor Factorization for Spatio-temporal Predictions](https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=8215609)
+    - ==超級無敵推！！！==
+    - 想要用這篇的方法做
+    - 可以針對不規律取樣的數據來做
+    - 看起來比下面的方法好
+      - LSTM 可能太複雜，運算效率不好
+  - [一種基於演化的新推薦系統](https://tanet2019.nsysu.edu.tw/assets/TANET2019_thesis/B1_006.pdf)
+    - 可以試試看，或延伸此方法（目前不推）
+    - MF + LSTM
+  - [基於RNN的序列化推薦系統總結](https://www.gushiciku.cn/pl/gdkG/zh-tw)
+  - [Personalized LSTM Based Matrix Factorization for Online QoS Prediction](https://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=8456329)
+- 張量分解
+  - 矩陣分解
+    - [Sparse Linear Optimization](https://web.ntnu.edu.tw/~algo/SparseLinearOptimization.html)
+    - [推荐系统中的矩阵分解技术](https://zhuanlan.zhihu.com/p/34497989)
+      - 非常詳細，說明優缺點，也有說如何與深度學習結合
+    - [推荐系统中的矩阵分解（一）（ALS,SVD,BiasdSVD,SVD ++,surprise工具）](https://blog.csdn.net/super_chiry/article/details/102988919)
+    - [视觉SLAM常见的QR分解SVD分解等矩阵分解方式求解满秩和亏秩最小二乘问题（最全的方法分析总结）](https://blog.csdn.net/wangshuailpp/article/details/80209863)
+  - [Tensor Decompositions and Applications](https://www.kolda.net/publication/TensorReview.pdf)
+    - 很完整，各種運算、分解都有講到
+    - 有討論分解的唯一性（充分條件、必要條件）
+    - 有提供 ALS 演算法公式
+    - The ALS method is simple to understand and implement, but can take many iterations to converge. Moreover, it is not guaranteed to converge to a global minimum or even a stationary point of (3.7), only to a solution where the objective function of (3.7) ceases to decrease. The final solution can be heavily dependent on the starting guess as well.
+      - 裡面有提到其中之一的解決方式就是加上 Tikhonov regularization（ridge term）
+      - [特殊矩陣 (14)：Gramian 矩陣](https://ccjou.wordpress.com/2011/03/07/%E7%89%B9%E6%AE%8A%E7%9F%A9%E9%99%A3-14%EF%BC%9Agramian-%E7%9F%A9%E9%99%A3/)
+        - A<sup>T</sup>A 本身就是半正定了，對角線大於等於零，所以對角線再一起加上一個 penalty 項就確定會變成正定，可以用 Cholesky 來解
+  - 浅谈张量分解（超級推）
+    - [浅谈张量分解（一）：如何简单地进行张量分解？](https://zhuanlan.zhihu.com/p/24798389)
+    - [浅谈张量分解（二）：张量分解的数学基础](https://zhuanlan.zhihu.com/p/24824550)
+    - [浅谈张量分解（三）：如何对稀疏矩阵进行奇异值分解？](https://zhuanlan.zhihu.com/p/25512080)
+    - [浅谈张量分解（四）：外积、Kronecker积和张量积](https://zhuanlan.zhihu.com/p/26774182)
+    - [浅谈张量分解（五）：稀疏张量的CP分解](https://zhuanlan.zhihu.com/p/25067269)
+  - 张量分解浅谈（超級推）
+    - [张量分解浅谈 - 目錄](https://blog.csdn.net/qq_45777142/category_10195034.html)
+    - [张量分解学习（一 基础铺垫）](https://blog.csdn.net/qq_45777142/article/details/107305300)
+    - [张量分解浅谈（二 CP NMF 张量秩）](https://blog.csdn.net/qq_45777142/article/details/107411830)
+    - [张量分解浅谈（三 SVD）](https://blog.csdn.net/qq_45777142/article/details/107440189)
+    - [张量分解浅谈（四 Tucker 分解）](https://blog.csdn.net/qq_45777142/article/details/107480164)
+  - 张量学习
+    - [张量学习 - 目錄](https://blog.csdn.net/qq_45777142/category_10164896.html)
+    - [张量基础学习（一 概念，求和指标，符号）](https://blog.csdn.net/qq_45777142/article/details/107115586)
+    - [张量基础学习（二 . 坐标变换，分量转化规律与张量方程 ）](https://blog.csdn.net/qq_45777142/article/details/107149606)
+    - [张量基础学习 （三 张量代数运算———上）](https://blog.csdn.net/qq_45777142/article/details/107223109)
+    - [张量基础学习（四 张量代数运算——下）](https://blog.csdn.net/qq_45777142/article/details/107280354)
+  - 論文
+    - [Autoregressive Tensor Factorization for Spatio-temporal Predictions](https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=8215609)
+      - ==超級無敵推！！！==
+      - 特徵分解
+      - 可以納入對於時間、空間的預測
+      - 可以針對不規律取樣的數據
+      - [自迴歸模型](https://zh.wikipedia.org/wiki/%E8%87%AA%E8%BF%B4%E6%AD%B8%E6%A8%A1%E5%9E%8B)
+      - [向量自迴歸模型](https://zh.wikipedia.org/wiki/%E5%90%91%E9%87%8F%E8%87%AA%E5%9B%9E%E5%BD%92%E6%A8%A1%E5%9E%8B)
+      - [高斯過程](https://zh.wikipedia.org/wiki/%E9%AB%98%E6%96%AF%E8%BF%87%E7%A8%8B)
+      - [11]：[Temporal Regularized Matrix Factorization for High-dimensional Time Series Prediction](https://www.cs.utexas.edu/~rofuyu/papers/tr-mf-nips.pdf)
+        - 從這裡可以看到，原論文的 p.3 的 l2 norm term 應該要加上平方，寫錯了！
+        - p.4 It is not hard to see that the above optimization yields the trivial all-zero solution for w∗, meaning the objective function is minimized when no temporal dependencies exist! 
+          - 這裡說到如果沒有好好設計權重，就會得出 trivial solution 也就是零，也就是說一般的 Matrix Factorization 完全沒有 forcasting 的功能，實驗的結果也是如此
+        - [论文笔记:Temporal Regularized Matrix Factorization forHigh-dimensional Time Series Prediction](https://blog.csdn.net/qq_40206371/article/details/120985896)
+        - [TRMF 辅助论文：最小二乘法复现TRMF](https://blog.csdn.net/qq_40206371/article/details/121215548)
+      - [12]：[Collaborative Filtering with Graph Information: Consistency and Scalable Methods](https://proceedings.neurips.cc/paper/2015/file/f4573fc71c731d5c362f0d7860945b88-Paper.pdf)
+        - GRALS（Graph Regularized Alternating Least Squares）演算法，適用於很多種狀況，其他論文也常用到
+      - [16]：[Spatial Dependence in linear Regression Models with an Introduction to Spatial Econometrics](http://www.econ.uiuc.edu/~hrtdmrt2/Teaching/SE_2016_19/References/Spatial_Dependence_in_Linear_Regression_Models_With_an_Introduction_to_Spatial_Econometrics_281_29.pdf)
+        - p.19 講到 MLE 方法
+      - 第 (8) 式，應該為 uk(1)
+      - 方位是把 360 度分成 n 份
+      - Ep 是鄰域
+      - W 是 inverse distance between locations
+      - bk 可以用 Cholesky 解（gDAR 部分）
+      - gSAR 部分要用 MLE 解
+      - gDAR、gSAR 選一個用就好
+    - [A Flexible and Efficient Algorithmic Framework for Constrained Matrix and Tensor Factorization](https://arxiv.org/pdf/1506.04209.pdf)
+      - AO-ADMM
+      - ==這篇 unfold 的方式跟其他篇不一樣，要注意！==
+        - 差一個 transpose，是以列為基準
+      - 跟 ALS 有差不多複雜度，ALS 又只是一特例，效果好
+      - 更泛化
+      - In many cases (5) is convex, but the uniqueness of the solution is very hard to guarantee.
+      - 用 block successive upper-bound minimization (BSUM) 來保證唯一收斂（加上 proximal regularization term）
+      - [Cholesky 分解](https://ccjou.wordpress.com/2010/09/16/cholesky-%E5%88%86%E8%A7%A3/)
+        - 對於對稱（Hermitian）、正定矩陣可用
+        - 常跟 (AA<sup>T</sup> + λI) 一起出現
+        - 對每一行
+          - 先根據前面幾行的對角線求現在對角線上的值
+          - 再推到這行上其他值
+    - [An AO-ADMM approach to constraining PARAFAC2 on all modes](https://arxiv.org/pdf/2110.01278.pdf)
+      - AO-ADMM with PARAFAC2
+      - PARAFAC：就是 CP 分解
+      - PARAFAC2：allows one of the factor matrices to vary across tensor slices
+        - ![](https://i.imgur.com/BjN89Te.png)
+    - [Matrix Factorization Techniques for Recommender Systems](https://ieeexplore.ieee.org/document/5197422)
+      - 矩陣分解推薦系統開始紅的論文
+      - 可以加上 bias、 implicit feedback
+      - SGD 通常比 ALS 快，但是 ALS 比較可以平行處理、對付稀疏數據（implicit data）
+      - [Netflix Update: Try This at Home](https://sifter.org/~simon/journal/20061211.html)
+        - Funk SVD 出處
+    - [Improving performance of tensor-based context-aware recommenders using Bias Tensor Factorization with context feature auto-encoding](https://www.sciencedirect.com/science/article/pii/S0950705117301909)
+      - 如何對張量元素的加上 bias
+    - [Implicit Regularization in Tensor Factorization](https://arxiv.org/pdf/2102.09972.pdf)
+    - [BPR: Bayesian Personalized Ranking from Implicit Feedback](https://arxiv.org/pdf/1205.2618.pdf)
+      - [BPR 與推薦系統排名](https://www.twblogs.net/a/5be2286b2b717720b51d106d)
+        - 用個人的對商品的評價來排名使用者會喜歡的商品
+        - 可以讓結合不同模型使其在排名上表現得更好
+    - Orthogonal Matrix Regularizer
+      - [Can We Gain More from Orthogonality Regularizations in Training Deep CNNs?](https://proceedings.neurips.cc/paper/2018/file/bf424cb7b0dea050a42b9739eb261a3a-Paper.pdf)
+      - [Constructing Orthogonal Latent Features for Arbitrary Loss](https://homepages.rpi.edu/~bennek/papers/mb7.pdf)
+      - [Orthogonalized ALS: A Theoretically Principled Tensor Decomposition Algorithm for Practical Use](http://proceedings.mlr.press/v70/sharan17a/sharan17a.pdf)
+        - ALS does not have any global convergence guarantees and can get stuck in local optima (Comon et al., 2009; Kolda & Bader, 2009)
+    - [Truncation of tensors in the hierarchical format](https://link.springer.com/article/10.1007/s40324-018-00184-5)
+- Factorization Machines
+  - [因子分解机（FM，FFM，DeepFM，libfm,xlearn）](https://blog.csdn.net/super_chiry/article/details/103112646?spm=1001.2014.3001.5502)
+    - 考虑了两个特征变量之间的交互影响
+    - 與 DNN 結合
+  - 初探Factorization Machine
+    - [初探Factorization Machine(I)](https://yulongtsai.medium.com/factorization-machine-63160bc2c06b)
+    - [初探Factorization Machine(II)](https://yulongtsai.medium.com/factorization-machine-implementation-analysis-c6c6dd5affa)
+  - [輕讀論文(二):DeepFM: A Factorization-Machine based Neural Network for CTR Prediction](https://lufor129.medium.com/%E8%BC%95%E8%AE%80%E8%AB%96%E6%96%87-%E4%BA%8C-deepfm-a-factorization-machine-based-neural-network-for-ctr-prediction-9de74b8772ab)
+  - 論文
+    - [Factorization Machines](https://yulongtsai.medium.com/factorization-machine-63160bc2c06b)
+      - 始祖
+    - [Factorization Machines with libFM](https://dl.acm.org/doi/pdf/10.1145/2168752.2168771)
+      - [geffy/tffm](https://github.com/geffy/tffm)
+      - Higher-Order
+    - [Higher-Order Factorization Machines](https://arxiv.org/pdf/1607.07195.pdf)
+    - [Spatial Aggregation and Temporal Convolution Networks for Real-time Kriging](https://arxiv.org/pdf/2109.12144.pdf)
+      - 深度學習
+    - [Wide & Deep Learning for Recommender Systems](https://arxiv.org/pdf/1606.07792.pdf)
+      - 結合特徵分解與深度學習效果會比較好
+      - 應該可以來試試看 ALS 和 SGD 混搭？
+        - 先用 ALS 找出初始值，再從這裡下去延伸
+- 缺失值處理
+  - [如何處理缺失值(使用Python)](https://medium.com/jackys-blog/%E5%A6%82%E4%BD%95%E8%99%95%E7%90%86%E7%BC%BA%E5%A4%B1%E5%80%BC-%E4%BD%BF%E7%94%A8python-479e030a43c7)
+  - [Kaggle知识点：缺失值处理](https://zhuanlan.zhihu.com/p/349505932)
+  - [基于傅里叶变换和kNNI的周期性时序数据缺失值补全算法](http://www.scicat.cn/5/rjgclw/20190706/2497109.html)
+  - [Autoregressive Tensor Factorization for Spatio-temporal Predictions](https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=8215609)
+  - [Spatial Aggregation and Temporal Convolution Networks for Real-time Kriging](https://arxiv.org/pdf/2109.12144.pdf)
+    - [閱讀筆記 : A Comprehensive Survey on Graph Neural Networks ( 簡介 + RecGNNs 篇)](https://z8663z.medium.com/%E9%96%B1%E8%AE%80%E7%AD%86%E8%A8%98-a-comprehensive-survey-on-graph-neural-networks-%E7%B7%A8%E8%BC%AF%E4%B8%AD-78118deae743)
+- 程式技術
+  - [TensorLy](http://tensorly.org/stable/index.html)
+    - [TensorLy: Tensor Learning in Python](https://arxiv.org/pdf/1610.09555.pdf)
+    - [Sparse](https://sparse.pydata.org/en/stable/index.html)
+  - [scikit-sparse - Sparse matrix extensions for SciPy](https://scikit-sparse.readthedocs.io/en/latest/index.html)
+    - [Cholesky 分解](https://ccjou.wordpress.com/2010/09/16/cholesky-%E5%88%86%E8%A7%A3/)
+  - [transdim - transportation data imputation](https://github.com/xinychen/transdim)
+    - [TRMF 範例](https://nbviewer.org/github/xinychen/transdim/blob/master/imputer/TRMF.ipynb)
+  - [Non-negative Matrix Factorization](https://github.com/raleng/nmf)
+    - 使用 AO-ADMM 的話可以參考的矩陣形式 Python code
+  - [对速度有洁癖？快来了解 Numpy 的 View 与 Copy](https://mofanpy.com/tutorials/data-manipulation/numpy/numpy-view-copy/)
+    - 多用只有 view 的方法，沒必要不要用 copy
+  - [numpy.tensordot](https://numpy.org/doc/stable/reference/generated/numpy.tensordot.html)
+    - 後來決定不用，但是這個函數很適合拿來理解張量積！
+  - [矩陣分解(Matrix Factorization): 交替最小平方法(Alternating least squares, ALS)和加權交替最小平方法(Alternating-least-squares with weighted-λ -regularization, ALS-WR)](https://chih-sheng-huang821.medium.com/%E7%9F%A9%E9%99%A3%E5%88%86%E8%A7%A3-matrix-factorization-%E4%BA%A4%E6%9B%BF%E6%9C%80%E5%B0%8F%E5%B9%B3%E6%96%B9%E6%B3%95-alternating-least-squares-2a71fd1393f7)
+  - [交替最小二乘法(Alternating Least Squares, ALS)](https://www.jianshu.com/p/6bdc803913b2)
+  - [Matrix Factorization with Alternating Least Squares](https://github.com/learn-co-curriculum/dsc-4-39-05-matrix-factorization-als/blob/master/index.ipynb)
+    - [Matrix Completion via Alternating Least Square(ALS)](http://stanford.edu/~rezab/classes/cme323/S15/notes/lec14.pdf)
+    - 有說明在 ALS 的公式中如果加上遮罩要如何寫？
+    - ALS 要一個 row 一個 row 來算，就沒有像 SGD 有完整的矩陣表示法
+  - Conjugate gradient method（共軛梯度法）
+    - [scipy.sparse.linalg.cg](https://docs.scipy.org/doc/scipy/reference/generated/scipy.sparse.linalg.cg.html)
+    - [Krylov 子空間法──線性方程的數值解法 (三)：共軛梯度法](https://ccjou.wordpress.com/2015/12/10/krylov-%E5%AD%90%E7%A9%BA%E9%96%93%E6%B3%95%E2%94%80%E2%94%80%E7%B7%9A%E6%80%A7%E6%96%B9%E7%A8%8B%E7%9A%84%E6%95%B8%E5%80%BC%E8%A7%A3%E6%B3%95-%E4%B8%89%EF%BC%9A%E5%85%B1%E8%BB%9B%E6%A2%AF%E5%BA%A6/)
+      - 重點：針對一個二次型（Quadratic-form）做最佳化
+        - 二次矩陣最好是正定實對稱矩陣
+    - [共轭梯度法（一）：线性共轭梯度](https://zhuanlan.zhihu.com/p/98642663)
+    - [[最佳化理論] Conjugate Direction Methods (2) - The Conjugate Gradient Algorithm for Quadratic Objective function](https://ch-hsieh.blogspot.com/2014/03/conjugate-direction-methods-2-conjugate.html)
+    - [Faster Implicit Matrix Factorization - Conjugate Gradient Method](https://www.benfrederickson.com/fast-implicit-matrix-factorization/)
+    - [Conjugate gradient method](https://en.wikipedia.org/wiki/Conjugate_gradient_method)
